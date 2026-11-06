@@ -252,11 +252,36 @@ describe("stopTunnel", () => {
   });
 });
 
-test("checkAutofwd wants --status-file", async () => {
-  const old = fakeHost({ exec: (_c, args) => ({ code: 0, stdout: args[0] === "--version" ? "autofwd 0.2.0\n" : "  -log\n  -quiet\n", stderr: "" }) });
-  await assert.rejects(checkAutofwd(old.host, settings), /autofwd 0\.2\.0 has no --status-file/);
-  const current = fakeHost({ exec: (_c, args) => ({ code: 0, stdout: args[0] === "--version" ? "autofwd 0.3.0\n" : "  -status-file path\n", stderr: "" }) });
-  assert.equal(await checkAutofwd(current.host, settings), "autofwd 0.3.0");
+describe("checkAutofwd", () => {
+  /** A Host whose `hc exec -- <program> <flag>` answers with `reply(flag)`, plain text as hc gives it. */
+  function hcExecHost(reply: (flag: string) => ExecResult) {
+    const calls: string[] = [];
+    const host: Host = {
+      ...fakeHost({}).host,
+      exec: async (command, args = []) => {
+        calls.push([command, ...args].join(" "));
+        return reply(args.at(-1) ?? "");
+      },
+    };
+    return { host, calls };
+  }
+
+  test("asks where tunnels run: through hc exec", async () => {
+    const { host, calls } = hcExecHost((flag) => ({ code: 0, stdout: flag === "--version" ? "autofwd 0.3.0\n" : "  -status-file path\n", stderr: "" }));
+    assert.equal(await checkAutofwd(host, settings), "autofwd 0.3.0");
+    assert.deepEqual(calls, ["hc exec -- autofwd --help", "hc exec -- autofwd --version"]);
+  });
+
+  test("wants --status-file", async () => {
+    const { host } = hcExecHost((flag) => ({ code: 0, stdout: flag === "--version" ? "autofwd 0.2.0\n" : "  -log\n  -quiet\n", stderr: "" }));
+    await assert.rejects(checkAutofwd(host, settings), /autofwd 0\.2\.0 has no --status-file/);
+  });
+
+  test("a program hc can't start says where to point it", async () => {
+    const stderr = '{"error":{"hint":"","kind":"spawn_failed","message":"cannot start autofwd: program not found"}}\n';
+    const { host } = hcExecHost(() => ({ code: 1, stdout: "", stderr }));
+    await assert.rejects(checkAutofwd(host, settings), /^Error: cannot start autofwd: program not found: hc-autofwd needs autofwd 0\.3\.0 or later on PATH, or its path as "autofwd" in .*config\.json$/);
+  });
 });
 
 describe("what to show", () => {

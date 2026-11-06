@@ -1,4 +1,4 @@
-import type { Host } from "../../host.ts";
+import type { ExecResult, Host } from "../../host.ts";
 
 // hc-autofwd: autofwd tunnels from this computer to herdr-core machines. Pure, tested in
 // core.test.ts, loaded by cli.ts and mod.ts alike; everything goes through `host`.
@@ -406,10 +406,37 @@ export async function retryTunnel(host: Host, t: Tunnel): Promise<void> {
   await hcJson(host, ["keys", t.address, "r", "--json"]);
 }
 
-/** autofwd's version, once it is known to take --status-file. */
+/**
+ * Runs a program where tunnels run: through the local hc (`hc exec`, plain output), with the
+ * environment hc gives its terminals. A Herdr window's own `exec` has the PATH the window started
+ * with, which on Windows can predate an install or upgrade (mise moves autofwd on each version)
+ * that hc's terminals already see. hc's own failure (program not found) becomes an HcError.
+ */
+export async function execLikeTunnels(host: Host, command: string, args: string[]): Promise<ExecResult> {
+  const r = await host.exec("hc", ["exec", "--", command, ...args]);
+  const err = r.stderr.trim();
+  if (r.code !== 0 && err.startsWith('{"error"')) {
+    let reply: unknown = null;
+    try {
+      reply = JSON.parse(err);
+    } catch {
+      // not hc's: the program's own stderr
+    }
+    if (isRecord(reply) && isRecord(reply.error)) throw new HcError(str(reply.error.kind) ?? "unknown", str(reply.error.message) ?? `cannot run ${command}`);
+  }
+  return r;
+}
+
+/** autofwd's version, once it is known to take --status-file (asked where tunnels run). */
 export async function checkAutofwd(host: Host, settings: Settings): Promise<string> {
-  const help = await host.exec(settings.autofwd, ["--help"]);
-  const version = (await host.exec(settings.autofwd, ["--version"])).stdout.trim() || settings.autofwd;
+  let help: ExecResult;
+  try {
+    help = await execLikeTunnels(host, settings.autofwd, ["--help"]);
+  } catch (error) {
+    const why = error instanceof Error ? error.message : String(error);
+    throw new Error(`${why}: hc-autofwd needs autofwd 0.3.0 or later on PATH, or its path as "autofwd" in ${configPath(settings.home)}`);
+  }
+  const version = (await execLikeTunnels(host, settings.autofwd, ["--version"])).stdout.trim() || settings.autofwd;
   if (!/-status-file/.test(help.stdout + help.stderr)) {
     throw new Error(`${version} has no --status-file: hc-autofwd needs autofwd 0.3.0 or later`);
   }
