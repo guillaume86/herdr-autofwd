@@ -41,6 +41,9 @@ const POPUP_CLOSED = `${NAME}.popup-closed`;
 /** The open popup's overlay id, so a command can close it instead of opening a second one. */
 const POPUP_OPEN = `${NAME}.popup`;
 const SAME_PRESS_MS = 250;
+/** The bar's last look at hc, so a copy that just started (a popup opening, the bar after a
+ *  restart) draws it at once while it asks hc again. Written only when it changed. */
+const CACHE_KEY = `${NAME}.cache`;
 
 /** Reading terminals() runs nothing: it says when a tunnel's terminal starts or ends. */
 const CHECK_MS = 2_000;
@@ -62,6 +65,13 @@ const message = (error: unknown) => (error instanceof Error ? error.message : St
 interface Prefs {
   autostart: boolean;
   machines: string[];
+}
+
+interface Snapshot {
+  machines: Machine[];
+  tunnels: Tunnel[];
+  autofwd: string;
+  autofwdOk: boolean;
 }
 
 function readPrefs(): Prefs {
@@ -112,6 +122,21 @@ class Model {
   /** Machines with a start, stop or retry under way. */
   pending = new Set<string>();
   signature = "";
+  /** The bar's model: it writes CACHE_KEY after each look at hc. */
+  publish = false;
+  published = "";
+
+  /** Draws the cached look, if any, until `open` has a fresh one ("Refreshing…" meanwhile). */
+  seed(): void {
+    const c = shared(CACHE_KEY) as Partial<Snapshot> | null | undefined;
+    if (!c || !Array.isArray(c.machines) || !Array.isArray(c.tunnels)) return;
+    this.machines = c.machines;
+    this.tunnels = c.tunnels;
+    this.autofwd = typeof c.autofwd === "string" ? c.autofwd : "";
+    this.autofwdOk = c.autofwdOk === true;
+    this.loading = false;
+    this.refreshing = true;
+  }
 
   /** Settings, the autofwd check, the first load. */
   async open(): Promise<void> {
@@ -119,7 +144,7 @@ class Model {
       this.settings = await loadSettings(herdrHost);
     } catch (error) {
       this.error = message(error);
-      this.loading = false;
+      this.loading = this.refreshing = false;
       return;
     }
     try {
@@ -127,9 +152,27 @@ class Model {
       this.autofwdOk = true;
     } catch (error) {
       this.autofwd = message(error);
+      this.autofwdOk = false;
     }
     await this.load();
-    this.loading = false;
+    this.loading = this.refreshing = false;
+  }
+
+  /** Shares what the bar saw, without what changes every few seconds (open connections, keepalives). */
+  share(): void {
+    const snapshot: Snapshot = {
+      machines: this.machines,
+      tunnels: this.tunnels.map((t) => ({
+        ...t,
+        status: t.status && { ...t.status, lastKeepalive: null, forwards: t.status.forwards.map((f) => ({ ...f, conns: 0 })) },
+      })),
+      autofwd: this.autofwd,
+      autofwdOk: this.autofwdOk,
+    };
+    const text = JSON.stringify(snapshot);
+    if (text === this.published) return;
+    this.published = text;
+    setShared(CACHE_KEY, snapshot);
   }
 
   /** Asks hc for the machines and tunnels, and sweeps status files nobody owns. */
@@ -141,6 +184,7 @@ class Model {
       this.machines = machines;
       this.tunnels = list.tunnels;
       this.error = null;
+      if (this.publish) this.share();
       await sweep(herdrHost, settings, list);
     } catch (error) {
       this.error = message(error);
@@ -280,6 +324,8 @@ export default class Tunnels extends View {
   override init(_props: unknown, cx: AsyncContext): void {
     this.model = new Model();
     this.popup = Boolean(props()?.overlay);
+    this.model.publish = !this.popup;
+    this.model.seed();
     this.expanded = new Set();
     this.anchor = null;
     this.pressed = 0;
@@ -500,7 +546,7 @@ export default class Tunnels extends View {
       const tip = !e.machine ? "hc no longer has this machine" : !e.machine.target ? "Reached through a command (--via): autofwd needs ssh" : on ? "Stop the tunnel" : "Start the tunnel";
       let line = summary(tun, now);
       if (p === "off" && e.machine && !e.machine.target) line = "off · reached --via, autofwd needs ssh";
-      else if (p === "off" && e.machine?.why) line = "off · hc can't reach it";
+      else if (p === "off" && e.machine?.why) line = "off · unreachable";
 
       const title = h_flex()
         .gap(8)
