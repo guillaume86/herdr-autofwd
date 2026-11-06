@@ -19,7 +19,8 @@ import {
   runArgs,
   staleFiles,
   startTunnel,
-  statusFilePid,
+  statusFileName,
+  statusFileOf,
   stopTunnel,
   summary,
   sweep,
@@ -64,6 +65,7 @@ function fakeHost(options: { hc?: (args: string[]) => HcReply; files?: Record<st
 
 const settings: Settings = parseSettings("/home/me", null);
 const DIR = "/home/me/.cache/hc-autofwd/status";
+const DESK_FILE = "autofwd-desk-aaaa1111.json";
 const desk: Machine = { name: "desk", target: "gui-desktop", state: "connected", why: null };
 
 function statusJSON(over: Record<string, unknown> = {}): string {
@@ -86,7 +88,7 @@ function statusJSON(over: Record<string, unknown> = {}): string {
 }
 
 function tunnel(over: Partial<Tunnel> = {}): Tunnel {
-  return { address: "t7", machine: "desk", live: true, pid: 4812, exitCode: null, reason: null, status: null, ...over };
+  return { address: "t7", machine: "desk", live: true, file: DESK_FILE, exitCode: null, reason: null, status: null, ...over };
 }
 
 describe("paths and settings", () => {
@@ -139,13 +141,15 @@ describe("parsing", () => {
     assert.equal(parseStatus("{ half"), null);
   });
 
-  test("status file names and their pids", () => {
-    assert.equal(statusFilePid("4812.json"), 4812);
-    assert.equal(statusFilePid(".4812.json.98123.tmp"), 4812);
-    assert.equal(statusFilePid("notes.txt"), null);
-    assert.equal(statusFilePid("desk.json"), null);
-    const files = ["4812.json", "100.json", ".100.json.1.tmp", ".4812.json.2.tmp", "readme.md"];
-    assert.deepEqual(staleFiles(files, [tunnel()]), ["100.json", ".100.json.1.tmp"]);
+  test("status file names: one per start, and which file a temporary one belongs to", () => {
+    assert.equal(statusFileName("My Box", "k3j9x2ab"), "autofwd-my-box-k3j9x2ab.json");
+    assert.equal(statusFileOf(DESK_FILE), DESK_FILE);
+    assert.equal(statusFileOf(`.${DESK_FILE}.98123.tmp`), DESK_FILE);
+    assert.equal(statusFileOf("4812.json"), "4812.json"); // an earlier build's: swept like any leftover
+    assert.equal(statusFileOf("notes.txt"), null);
+    assert.equal(statusFileOf("desk.json"), null);
+    const files = [DESK_FILE, `.${DESK_FILE}.2.tmp`, "autofwd-desk-old00000.json", ".autofwd-desk-old00000.json.1.tmp", "4812.json", "readme.md"];
+    assert.deepEqual(staleFiles(files, [tunnel()]), ["autofwd-desk-old00000.json", ".autofwd-desk-old00000.json.1.tmp", "4812.json"]);
   });
 });
 
@@ -156,14 +160,15 @@ describe("starting", () => {
     assert.equal(terminalName("a".repeat(40)).length, 32);
   });
 
-  test("runArgs: a parentless hc terminal running autofwd with a {pid} status file", () => {
+  test("runArgs: a parentless hc terminal running autofwd, its status file named in a label", () => {
     const s = { ...settings, args: ["--min-port", "3000"] };
-    assert.deepEqual(runArgs(s, desk), [
+    assert.deepEqual(runArgs(s, desk, DESK_FILE), [
       "run", "--json", "--bg", "--no-parent", "--name", "autofwd-desk",
-      "--label", "hc-autofwd=tunnel", "--label", "hc-autofwd.machine=desk", "--cwd", "/home/me",
-      "--", "autofwd", "--min-port", "3000", "--status-file", `${DIR}/{pid}.json`, "gui-desktop",
+      "--label", "hc-autofwd=tunnel", "--label", "hc-autofwd.machine=desk", "--label", `hc-autofwd.file=${DESK_FILE}`,
+      "--cwd", "/home/me",
+      "--", "autofwd", "--min-port", "3000", "--status-file", `${DIR}/${DESK_FILE}`, "gui-desktop",
     ]);
-    assert.throws(() => runArgs(settings, { ...desk, target: null }), /--via/);
+    assert.throws(() => runArgs(settings, { ...desk, target: null }, DESK_FILE), /--via/);
   });
 
   test("a running tunnel is left alone", async () => {
@@ -174,10 +179,10 @@ describe("starting", () => {
 
   test("an ended tunnel and its file go before the new one starts", async () => {
     const { host, calls } = fakeHost({ hc: (args) => (args[0] === "run" ? { address: "t12" } : { removed: args[1] }) });
-    const ended = tunnel({ address: "t3", live: false, pid: 100, exitCode: 1 });
-    assert.equal(await startTunnel(host, settings, desk, [ended, tunnel({ machine: "nas", live: false })]), "t12");
-    assert.deepEqual(calls.slice(0, 2), ["hc rm t3 --json", `removeFile ${DIR}/100.json`]);
-    assert.match(calls[2] ?? "", /^hc run --json --bg --no-parent /);
+    const ended = tunnel({ address: "t3", live: false, file: "autofwd-desk-old00000.json", exitCode: 1 });
+    assert.equal(await startTunnel(host, settings, desk, [ended, tunnel({ machine: "nas", live: false })], "new11111"), "t12");
+    assert.deepEqual(calls.slice(0, 2), ["hc rm t3 --json", `removeFile ${DIR}/autofwd-desk-old00000.json`]);
+    assert.match(calls[2] ?? "", /^hc run --json --bg --no-parent .* --status-file \S+autofwd-desk-new11111\.json gui-desktop$/);
     assert.equal(calls.length, 3);
   });
 });
@@ -191,24 +196,24 @@ describe("listTunnels", () => {
     ],
   };
   const get: Record<string, HcReply> = {
-    t7: { pid: 4812, labels: { "hc-autofwd": "tunnel", "hc-autofwd.machine": "desk" } },
-    t3: { pid: 100, labels: { "hc-autofwd": "tunnel", "hc-autofwd.machine": "nas" } },
+    t7: { pid: 4812, labels: { "hc-autofwd": "tunnel", "hc-autofwd.machine": "desk", "hc-autofwd.file": DESK_FILE } },
+    t3: { pid: 100, labels: { "hc-autofwd": "tunnel", "hc-autofwd.machine": "nas", "hc-autofwd.file": "autofwd-nas-bbbb2222.json" } },
   };
   const hc = (args: string[]): HcReply => (args[0] === "ls" ? ls : (get[args[1] ?? ""] ?? { error: { kind: "not_found", message: "no terminal" } }));
 
   test("joins hc's terminals with their status files, folder first", async () => {
-    const { host, calls } = fakeHost({ hc, files: { [`${DIR}/4812.json`]: statusJSON(), [`${DIR}/55.json`]: statusJSON({ pid: 55 }) } });
+    const { host, calls } = fakeHost({ hc, files: { [`${DIR}/${DESK_FILE}`]: statusJSON(), [`${DIR}/autofwd-desk-old00000.json`]: statusJSON({ pid: 55 }) } });
     const known = new Map();
     const list = await listTunnels(host, settings, known);
     assert.deepEqual(calls.slice(0, 2), [`listDir ${DIR}`, "hc ls --all --json --label hc-autofwd=tunnel"]);
     assert.deepEqual(
-      list.tunnels.map((t) => [t.address, t.machine, t.live, t.pid, t.exitCode, t.status?.state ?? null]),
+      list.tunnels.map((t) => [t.address, t.machine, t.live, t.file, t.exitCode, t.status?.state ?? null]),
       [
-        ["t7", "desk", true, 4812, null, "connected"],
-        ["t3", "nas", false, 100, 1, null],
+        ["t7", "desk", true, DESK_FILE, null, "connected"],
+        ["t3", "nas", false, "autofwd-nas-bbbb2222.json", 1, null],
       ],
     );
-    assert.deepEqual(list.files.sort(), ["4812.json", "55.json"]);
+    assert.deepEqual(list.files.sort(), ["autofwd-desk-aaaa1111.json", "autofwd-desk-old00000.json"]);
 
     // hc get is asked once per terminal.
     calls.length = 0;
@@ -218,7 +223,7 @@ describe("listTunnels", () => {
     // Only the file nobody owns is swept.
     calls.length = 0;
     await sweep(host, settings, list);
-    assert.deepEqual(calls, [`removeFile ${DIR}/55.json`]);
+    assert.deepEqual(calls, [`removeFile ${DIR}/autofwd-desk-old00000.json`]);
   });
 
   test("hc's errors other than a vanished terminal stop the listing", async () => {
@@ -231,7 +236,7 @@ describe("stopTunnel", () => {
   test("Ctrl+C, a wait, then the terminal and its file go", async () => {
     const { host, calls } = fakeHost({ hc: (args) => (args[0] === "get" ? { state: "finished" } : {}) });
     await stopTunnel(host, settings, tunnel());
-    assert.deepEqual(calls, ["hc keys t7 ctrl+c --json", "hc wait t7 --timeout 5 --json", "hc get t7 --json", "hc rm t7 --json", `removeFile ${DIR}/4812.json`]);
+    assert.deepEqual(calls, ["hc keys t7 ctrl+c --json", "hc wait t7 --timeout 5 --json", "hc get t7 --json", "hc rm t7 --json", `removeFile ${DIR}/${DESK_FILE}`]);
   });
 
   test("one that ignores Ctrl+C is killed", async () => {
@@ -242,7 +247,7 @@ describe("stopTunnel", () => {
 
   test("an ended one is only removed, even when hc already forgot it", async () => {
     const { host, calls } = fakeHost({ hc: () => ({ error: { kind: "not_found", message: "no terminal t3" } }) });
-    await stopTunnel(host, settings, tunnel({ address: "t3", live: false, pid: null }));
+    await stopTunnel(host, settings, tunnel({ address: "t3", live: false, file: null }));
     assert.deepEqual(calls, ["hc rm t3 --json"]);
   });
 });

@@ -19,6 +19,7 @@ import {
   readStatuses,
   retryTunnel,
   startTunnel,
+  statusFileOf,
   stopTunnel,
   summary,
   sweep,
@@ -183,10 +184,10 @@ class Model {
           await cx.sleep(WATCH_RETRY_MS); // no folder before the first tunnel
           continue;
         }
-        const pids = new Set(this.tunnels.map((t) => t.pid));
+        const files = new Set(this.tunnels.map((t) => t.file));
         const unknown = changed.some((path) => {
-          const m = /(\d+)\.json$/.exec(path);
-          return m !== null && !pids.has(Number(m[1]));
+          const file = statusFileOf(path.split(/[\\/]/).pop() ?? "");
+          return file !== null && !files.has(file);
         });
         if (unknown) this.refresh(cx);
         else await readStatuses(herdrHost, settings, this.tunnels).catch(() => {});

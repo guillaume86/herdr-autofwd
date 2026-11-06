@@ -6,13 +6,17 @@ import type { Host } from "../../host.ts";
 // Each tunnel is one `autofwd <ssh target>` in a terminal of the local hc, started without a
 // parent so it outlives whoever started it. hc is the record of what runs: a tunnel is a
 // terminal carrying MARK_LABEL, and MACHINE_LABEL says where it goes. autofwd keeps its state
-// in `<statusDir>/<pid>.json` (--status-file with {pid}); `hc get` gives the terminal's pid, so
-// each file belongs to exactly one terminal, and a file no terminal owns is left over.
+// in a status file whose name is chosen here, unique per start, and recorded in FILE_LABEL: so
+// each file belongs to exactly one terminal, and a file no terminal names is left over. (Not
+// autofwd's {pid}: hc's pid is that of what it started, which a launcher such as mise's shim
+// is not.)
 
 /** Every tunnel's terminal carries it. `hc ls --label` only filters on key=value pairs. */
 export const MARK_LABEL = "hc-autofwd=tunnel";
 /** The hc machine a tunnel reaches. */
 export const MACHINE_LABEL = "hc-autofwd.machine";
+/** The name of the tunnel's status file, in the status folder. */
+export const FILE_LABEL = "hc-autofwd.file";
 
 // ── Paths and settings ──────────────────────────────────────────────────────────────────
 
@@ -194,13 +198,18 @@ export function parseStatus(text: string): AutofwdStatus | null {
   };
 }
 
-/** The status file name autofwd uses for `pid`, given `{pid}.json`. */
-export const statusFileName = (pid: number): string => `${pid}.json`;
+/** A tunnel's status file name: its terminal's name and a token unique to this start. */
+export const statusFileName = (machine: string, token: string): string => `${terminalName(machine)}-${token}.json`;
 
-/** The pid a status file (or autofwd's temporary `.<pid>.json.*.tmp`) belongs to, or null for other files. */
-export function statusFilePid(name: string): number | null {
-  const m = /^(\d+)\.json$/.exec(name) ?? /^\.(\d+)\.json\..+\.tmp$/.exec(name);
-  return m ? Number(m[1]) : null;
+/**
+ * The status file a name in the status folder belongs to: itself, or for autofwd's temporary
+ * `.<file>.<random>.tmp` the file being written. Null for anything hc-autofwd didn't name
+ * (`autofwd-*.json`), and for the `<pid>.json` of earlier builds, which are left over too.
+ */
+export function statusFileOf(name: string): string | null {
+  const tmp = /^\.(.+\.json)\.[^.]+\.tmp$/.exec(name);
+  const file = tmp ? (tmp[1] ?? "") : name;
+  return /^autofwd-.+\.json$/.test(file) || /^\d+\.json$/.test(file) ? file : null;
 }
 
 // ── Tunnels ─────────────────────────────────────────────────────────────────────────────
@@ -211,8 +220,8 @@ export interface Tunnel {
   /** The hc machine it reaches. */
   machine: string;
   live: boolean;
-  /** autofwd's pid, which names its status file. */
-  pid: number | null;
+  /** Its status file's name in the status folder; null for a terminal without one (not started here). */
+  file: string | null;
   /** How it ended, once it has. */
   exitCode: number | null;
   reason: string | null;
@@ -223,7 +232,7 @@ export interface Tunnel {
 /** What `hc get` says about a terminal that never changes: asked once per terminal. */
 export interface Identity {
   machine: string;
-  pid: number | null;
+  file: string | null;
 }
 export type Identities = Map<string, Identity>;
 
@@ -249,7 +258,7 @@ export async function listTunnels(host: Host, settings: Settings, known: Identit
         try {
           const got = await hcJson(host, ["get", address, "--json"]);
           const labels = isRecord(got.labels) ? got.labels : {};
-          id = { machine: str(labels[MACHINE_LABEL]) ?? "?", pid: num(got.pid) };
+          id = { machine: str(labels[MACHINE_LABEL]) ?? "?", file: str(labels[FILE_LABEL]) };
           known.set(address, id);
         } catch (error) {
           if (notFound(error)) return null; // removed meanwhile
@@ -260,7 +269,7 @@ export async function listTunnels(host: Host, settings: Settings, known: Identit
         address,
         machine: id.machine,
         live: t.state === "live",
-        pid: id.pid,
+        file: id.file,
         exitCode: num(t.exit_code),
         reason: str(t.reason),
         status: null,
@@ -277,11 +286,11 @@ export async function listTunnels(host: Host, settings: Settings, known: Identit
 export async function readStatuses(host: Host, settings: Settings, tunnels: Tunnel[], files?: string[]): Promise<void> {
   await Promise.all(
     tunnels.map(async (t) => {
-      if (t.pid === null || (files && !files.includes(statusFileName(t.pid)))) {
+      if (t.file === null || (files && !files.includes(t.file))) {
         t.status = null;
         return;
       }
-      const text = await host.readTextFile(joinPath(settings.statusDir, statusFileName(t.pid)));
+      const text = await host.readTextFile(joinPath(settings.statusDir, t.file));
       const status = text === null ? null : parseStatus(text);
       // A half-written file can't happen (autofwd renames), but a foreign one can: keep the last good one then.
       if (text === null || status !== null) t.status = status;
@@ -289,12 +298,12 @@ export async function readStatuses(host: Host, settings: Settings, tunnels: Tunn
   );
 }
 
-/** Status files no tunnel terminal owns: left by an autofwd that was killed, or by one whose terminal was removed. */
+/** Status files no tunnel terminal names: left by an autofwd that was killed, or by one whose terminal was removed. */
 export function staleFiles(files: string[], tunnels: Tunnel[]): string[] {
-  const owned = new Set(tunnels.map((t) => t.pid));
+  const owned = new Set(tunnels.map((t) => t.file));
   return files.filter((name) => {
-    const pid = statusFilePid(name);
-    return pid !== null && !owned.has(pid);
+    const file = statusFileOf(name);
+    return file !== null && !owned.has(file);
   });
 }
 
@@ -309,8 +318,11 @@ export function terminalName(machine: string): string {
   return `autofwd-${safe || "machine"}`.slice(0, 32);
 }
 
-/** `hc` arguments that start a machine's tunnel. */
-export function runArgs(settings: Settings, machine: Machine): string[] {
+/** A short random token: what makes each start's status file its own. */
+export const newToken = (): string => Math.random().toString(36).slice(2, 10).padEnd(8, "0");
+
+/** `hc` arguments that start a machine's tunnel, its status file named `file`. */
+export function runArgs(settings: Settings, machine: Machine, file: string): string[] {
   if (!machine.target) throw new Error(`${machine.name} is reached through a command (--via), not ssh: autofwd can't tunnel to it`);
   return [
     "run",
@@ -323,13 +335,15 @@ export function runArgs(settings: Settings, machine: Machine): string[] {
     MARK_LABEL,
     "--label",
     `${MACHINE_LABEL}=${machine.name}`,
+    "--label",
+    `${FILE_LABEL}=${file}`,
     "--cwd",
     settings.home,
     "--",
     settings.autofwd,
     ...settings.args,
     "--status-file",
-    joinPath(settings.statusDir, "{pid}.json"),
+    joinPath(settings.statusDir, file),
     machine.target,
   ];
 }
@@ -341,8 +355,8 @@ export const tunnelsOf = (tunnels: Tunnel[], machine: string): Tunnel[] => tunne
  * Starts a machine's tunnel, unless one runs already: returns its terminal's address.
  * Finished tunnels of that machine go first, so the new one is the only record.
  */
-export async function startTunnel(host: Host, settings: Settings, machine: Machine, tunnels: Tunnel[]): Promise<string> {
-  const args = runArgs(settings, machine);
+export async function startTunnel(host: Host, settings: Settings, machine: Machine, tunnels: Tunnel[], token: string = newToken()): Promise<string> {
+  const args = runArgs(settings, machine, statusFileName(machine.name, token));
   const mine = tunnelsOf(tunnels, machine.name);
   const running = mine.find((t) => t.live);
   if (running) return running.address;
@@ -383,7 +397,7 @@ async function discard(host: Host, settings: Settings, t: Tunnel): Promise<void>
   await hcJson(host, ["rm", t.address, "--json"]).catch((error: unknown) => {
     if (!notFound(error)) throw error;
   });
-  if (t.pid !== null) await host.removeFile(joinPath(settings.statusDir, statusFileName(t.pid)));
+  if (t.file !== null) await host.removeFile(joinPath(settings.statusDir, t.file));
 }
 
 /** Asks a running tunnel to look for new ports now and retry the busy ones (autofwd's `r` key). */
