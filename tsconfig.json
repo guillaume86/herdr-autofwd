@@ -1,0 +1,9 @@
+{
+  "// why": "Solution file for `tsc -b` and the editor, which picks the project that includes the open file.",
+  "files": [],
+  "references": [
+    { "path": "./tsconfig.core.json" },
+    { "path": "./tsconfig.cli.json" },
+    { "path": "./tsconfig.mod.json" }
+  ]
+}

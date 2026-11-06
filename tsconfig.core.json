@@ -1,0 +1,15 @@
+{
+  "// why": [
+    "The pure part: what both runtimes can load. No `types`, no `paths`: importing",
+    "node:* or herdr from a core file, or using a Node/herdr global, fails here.",
+    "Every .ts under a tool folder is pure except its entry points (cli.ts, mod.ts,",
+    "at the tool's root) and tests."
+  ],
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "node_modules/.cache/tsc/core",
+    "tsBuildInfoFile": "node_modules/.cache/tsc/core.tsbuildinfo"
+  },
+  "include": ["src/host.ts", "src/lib/**/*.ts", "src/tools/**/*.ts"],
+  "exclude": ["**/*.test.ts", "src/tools/*/cli.ts", "src/tools/*/mod.ts"]
+}

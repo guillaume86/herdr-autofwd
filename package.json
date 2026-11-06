@@ -1,0 +1,30 @@
+{
+  "name": "herdr-autofwd",
+  "version": "0.1.0",
+  "private": true,
+  "description": "hc-autofwd: autofwd tunnels to herdr-core machines, as a CLI and a herdr-app mod.",
+  "type": "module",
+  "packageManager": "pnpm@11.5.2",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "hc-autofwd": "dist/cli/hc-autofwd.mjs"
+  },
+  "scripts": {
+    "build": "node scripts/build.ts",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "node scripts/sync-types.ts && tsc -b",
+    "sync-types": "node scripts/sync-types.ts --write",
+    "check": "pnpm typecheck && pnpm test && pnpm build && node scripts/check-mods.ts",
+    "dev": "node scripts/dev.ts",
+    "new-tool": "node scripts/new-tool.ts",
+    "app": "node scripts/app.ts",
+    "deploy-mods": "pnpm build && node scripts/deploy.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

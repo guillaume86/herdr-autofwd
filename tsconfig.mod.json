@@ -1,0 +1,23 @@
+{
+  "// why": [
+    "herdr-app: the mod entry points and the herdr host, checked against the type",
+    "files the installed app generates (copied to types/ by `pnpm typecheck`).",
+    "`herdr` is a module file, hence `paths`; gpui-kit.d.ts declares the other",
+    "modules (gpui-kit, gpui-base, fs/promises, ...) and the runtime's globals."
+  ],
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "paths": { "herdr": ["./types/herdr.d.ts"] },
+    "outDir": "node_modules/.cache/tsc/mod",
+    "tsBuildInfoFile": "node_modules/.cache/tsc/mod.tsbuildinfo"
+  },
+  "include": [
+    "types/gpui-kit.d.ts",
+    "src/host.ts",
+    "src/lib/**/*.ts",
+    "src/hosts/herdr.ts",
+    "src/ui/**/*.ts",
+    "src/tools/**/*.ts"
+  ],
+  "exclude": ["**/*.test.ts", "src/tools/*/cli.ts"]
+}

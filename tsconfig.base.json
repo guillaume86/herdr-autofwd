@@ -1,0 +1,35 @@
+{
+  "// why": [
+    "Shared by the three projects. `lib` is ES2022 and `types` is empty on purpose:",
+    "a project only sees the globals its runtime really has. The core gets none,",
+    "the CLI adds Node's, the mods add herdr-app's (types/gpui-kit.d.ts).",
+    "",
+    "`erasableSyntaxOnly` + `allowImportingTsExtensions` let Node run the .ts files",
+    "as they are (type stripping): no enums, no parameter properties, `.ts` in imports.",
+    "",
+    "`exactOptionalPropertyTypes`: an optional field takes `undefined` only when its",
+    "type says so. herdr's own option types don't, so the hosts spread only set keys.",
+    "",
+    "Declarations are emitted only so `tsc -b` and the editor can treat the three",
+    "projects as one solution; they go to node_modules/.cache and nobody reads them."
+  ],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": [],
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "composite": true,
+    "emitDeclarationOnly": true
+  }
+}

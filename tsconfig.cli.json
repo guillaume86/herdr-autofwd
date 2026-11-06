@@ -1,0 +1,26 @@
+{
+  "// why": [
+    "Node: the CLI entry points, the Node host, the tests and their helpers, the build scripts.",
+    "`checkJs` covers scripts/create.js and scaffold.js, plain JavaScript so `pnpm dlx` can run",
+    "them from node_modules. scripts/skeleton/ is a template with placeholders, not source."
+  ],
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowJs": true,
+    "checkJs": true,
+    "outDir": "node_modules/.cache/tsc/cli",
+    "tsBuildInfoFile": "node_modules/.cache/tsc/cli.tsbuildinfo"
+  },
+  "include": [
+    "src/host.ts",
+    "src/lib/**/*.ts",
+    "src/hosts/node.ts",
+    "src/hosts/*.test.ts",
+    "src/hosts/testing/*.ts",
+    "src/tools/**/*.ts",
+    "scripts/**/*.ts",
+    "scripts/**/*.js"
+  ],
+  "exclude": ["src/tools/*/mod.ts", "scripts/skeleton/**"]
+}
