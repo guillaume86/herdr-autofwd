@@ -54,7 +54,12 @@ const SLOW_MS = 30_000;
 /** A missing status folder (no tunnel yet) is watched again after this. */
 const WATCH_RETRY_MS = 5_000;
 
-const PAD = 8;
+// The bar item's content sits in a pill (PILL_X a side) that lights up on hover and stays pressed
+// while the popup is up, like the tab bar's Files / Changes buttons. PAD + PILL_X = 8 keeps the icon
+// 16 px from its neighbours; PILL_H 21 in a 30 px bar sits on whole pixels at 100, 110 and 120 %.
+const PAD = 2;
+const PILL_X = 6;
+const PILL_H = 21;
 const POPUP_W = 340;
 /** The popup's card around the machine list: padding, header, footer, gaps. */
 const POPUP_CHROME = 104;
@@ -436,7 +441,10 @@ export default class Tunnels extends View {
     // way counts), else the muted grey of the native items with a tunnel up, dim and faded with
     // none (stopped, still loading, or no tunnel at all).
     const off = !broken && m.pending.size === 0 && (worst === "off" || worst === "stopped");
-    const color = broken ? t.blocked : m.pending.size > 0 || ["starting", "connecting", "reconnecting"].includes(worst) ? t.working : off ? t.dim : t.muted;
+    const open = Boolean(shared(POPUP_OPEN));
+    const calm = broken ? t.blocked : m.pending.size > 0 || ["starting", "connecting", "reconnecting"].includes(worst) ? t.working : off ? t.dim : t.muted;
+    // Pressed, a calm icon takes the foreground colour like a panel button's label; a state colour stays.
+    const color = open && calm === t.muted ? t.foreground : calm;
 
     const tip = m.error
       ? m.error
@@ -470,7 +478,12 @@ export default class Tunnels extends View {
         h_flex()
           .id("content")
           .flex_none()
+          .h(PILL_H)
+          .px(PILL_X)
+          .rounded(6)
           .items_center()
+          .when(open, (s) => s.bg(t.selected))
+          .hover((s) => s.bg(t.hover))
           .on_size_change((size) => this.fit(size.width))
           .child(svg(ICON).size(13).flex_none().text_color(color).opacity(off ? 0.6 : 1)),
       );
