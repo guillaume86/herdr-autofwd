@@ -26,7 +26,7 @@ import {
   tunnelsOf,
 } from "./core.ts";
 
-// One view, two roles, like Claude Usage: in a status bar it is a compact line (a dot per tunnel),
+// One view, two roles, like Claude Usage: in a status bar it is an icon colored by the tunnels,
 // and a click opens it again as a popup (`props().overlay`) to switch tunnels and see their ports.
 // It only shows and asks: the tunnels are hc terminals that core.ts starts and stops, the same ones
 // the CLI sees, and they keep running when the window closes. The bar, always on screen, is the
@@ -52,7 +52,7 @@ const SLOW_MS = 30_000;
 /** A missing status folder (no tunnel yet) is watched again after this. */
 const WATCH_RETRY_MS = 5_000;
 
-const PAD = 12;
+const PAD = 8;
 const POPUP_W = 340;
 /** The popup's card around the machine list: padding, header, footer, gaps. */
 const POPUP_CHROME = 104;
@@ -102,6 +102,24 @@ function phaseColor(p: Phase, t: Palette) {
     default:
       return t.working;
   }
+}
+
+/** The bar's icon takes the color of the worst phase among the tunnels, in this order. */
+const BAR_ORDER: Phase[] = ["failed", "stopped", "starting", "connecting", "reconnecting", "connected", "off"];
+
+/** The tooltip's first line: "2 tunnels up", "1 tunnel failed · 1 up". */
+function barSummary(phases: Phase[]): string {
+  const count = (...of: Phase[]) => phases.filter((p) => of.includes(p)).length;
+  const parts = (
+    [
+      [count("failed"), "failed"],
+      [count("stopped"), "stopped"],
+      [count("starting"), "starting"],
+      [count("connecting", "reconnecting"), "connecting"],
+      [count("connected"), "up"],
+    ] as const
+  ).filter(([n]) => n > 0);
+  return parts.map(([n, word], i) => (i === 0 ? `${n} ${n === 1 ? "tunnel" : "tunnels"} ${word}` : `${n} ${word}`)).join(" · ");
 }
 
 const zoom = () => Number(settings()?.zoom) || 1;
@@ -408,27 +426,23 @@ export default class Tunnels extends View {
     const now = Date.now();
     const shown = entries(m.machines, m.tunnels).filter((e) => e.tunnel !== null);
     const edge = props()?.border;
-    const worst = shown.some((e) => ["failed", "stopped"].includes(phase(e.tunnel)));
+    const phases = shown.map((e) => phase(e.tunnel));
+    const worst = BAR_ORDER.find((p) => phases.includes(p)) ?? "off";
+    const broken = m.error !== null || (!m.loading && !m.autofwdOk) || worst === "failed" || worst === "stopped";
+
+    // The icon alone says how the tunnels are: blocked, else working (a start, stop or retry under
+    // way counts), else done, else dim (no tunnel, or still loading).
+    const color = broken ? t.blocked : m.pending.size > 0 ? t.working : phaseColor(worst, t);
 
     const tip = m.error
       ? m.error
       : !m.loading && !m.autofwdOk
         ? m.autofwd
-        : shown.length === 0
-          ? "No tunnels: click to start one"
-          : shown.map((e) => `${e.name}: ${summary(e.tunnel, now)}`).join("\n");
-
-    const items = shown.map((e) => {
-      const p = phase(e.tunnel);
-      const ports = e.tunnel?.live ? (e.tunnel.status?.forwards.length ?? 0) : 0;
-      return h_flex()
-        .gap(5)
-        .items_center()
-        .flex_none()
-        .child(m.pending.has(e.name) ? div().text_color(t.working).frames(SPINNER, 90) : div().size(7).rounded(4).bg(phaseColor(p, t)))
-        .child(div().text_color(t.muted).child(e.name))
-        .when(ports > 0, (s) => s.child(div().text_color(t.dim).child(String(ports))));
-    });
+        : m.loading
+          ? "Looking for tunnels…"
+          : shown.length === 0
+            ? "No tunnels: click to start one"
+            : [barSummary(phases), ...shown.map((e) => `${e.name}: ${summary(e.tunnel, now)}`)].join("\n");
 
     return h_flex()
       .id("root")
@@ -452,13 +466,9 @@ export default class Tunnels extends View {
         h_flex()
           .id("content")
           .flex_none()
-          .gap(10)
           .items_center()
           .on_size_change((size) => this.fit(size.width))
-          .child(svg(ICON).size(13).flex_none().text_color(worst || m.error || (!m.loading && !m.autofwdOk) ? t.blocked : shown.length ? t.muted : t.dim))
-          .when(m.loading, (s) => s.child(div().text_color(t.dim).child("…")))
-          .when(!m.loading && shown.length === 0, (s) => s.child(div().text_color(t.dim).child(m.autofwdOk ? "tunnels" : "autofwd?")))
-          .children(items),
+          .child(svg(ICON).size(13).flex_none().text_color(color)),
       );
   }
 
