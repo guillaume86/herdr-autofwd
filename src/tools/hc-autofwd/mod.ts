@@ -428,11 +428,13 @@ export default class Tunnels extends View {
     const edge = props()?.border;
     const phases = shown.map((e) => phase(e.tunnel));
     const worst = BAR_ORDER.find((p) => phases.includes(p)) ?? "off";
-    const broken = m.error !== null || (!m.loading && !m.autofwdOk) || worst === "failed" || worst === "stopped";
+    const broken = m.error !== null || (!m.loading && !m.autofwdOk) || worst === "failed";
 
     // The icon alone says how the tunnels are: blocked, else working (a start, stop or retry under
-    // way counts), else done, else dim (no tunnel, or still loading).
-    const color = broken ? t.blocked : m.pending.size > 0 ? t.working : phaseColor(worst, t);
+    // way counts), else the plain dim grey of the native icons with a tunnel up, faded with none
+    // (stopped, still loading, or no tunnel at all).
+    const off = !broken && m.pending.size === 0 && (worst === "off" || worst === "stopped");
+    const color = broken ? t.blocked : m.pending.size > 0 || ["starting", "connecting", "reconnecting"].includes(worst) ? t.working : t.dim;
 
     const tip = m.error
       ? m.error
@@ -468,7 +470,7 @@ export default class Tunnels extends View {
           .flex_none()
           .items_center()
           .on_size_change((size) => this.fit(size.width))
-          .child(svg(ICON).size(13).flex_none().text_color(color)),
+          .child(svg(ICON).size(13).flex_none().text_color(color).opacity(off ? 0.6 : 1)),
       );
   }
 
