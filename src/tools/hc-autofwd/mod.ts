@@ -431,10 +431,10 @@ export default class Tunnels extends View {
     const broken = m.error !== null || (!m.loading && !m.autofwdOk) || worst === "failed";
 
     // The icon alone says how the tunnels are: blocked, else working (a start, stop or retry under
-    // way counts), else the plain dim grey of the native icons with a tunnel up, faded with none
-    // (stopped, still loading, or no tunnel at all).
+    // way counts), else the muted grey of the native items with a tunnel up, dim and faded with
+    // none (stopped, still loading, or no tunnel at all).
     const off = !broken && m.pending.size === 0 && (worst === "off" || worst === "stopped");
-    const color = broken ? t.blocked : m.pending.size > 0 || ["starting", "connecting", "reconnecting"].includes(worst) ? t.working : t.dim;
+    const color = broken ? t.blocked : m.pending.size > 0 || ["starting", "connecting", "reconnecting"].includes(worst) ? t.working : off ? t.dim : t.muted;
 
     const tip = m.error
       ? m.error
