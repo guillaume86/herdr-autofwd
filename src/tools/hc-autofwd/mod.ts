@@ -12,6 +12,7 @@ import {
   type Tunnel,
   checkAutofwd,
   entries,
+  forwardDetail,
   listMachines,
   listTunnels,
   loadSettings,
@@ -25,6 +26,7 @@ import {
   sweep,
   tunnelsOf,
 } from "./core.ts";
+import { processIcon } from "./icons.ts";
 
 // One view, two roles, like Claude Usage: in a status bar it is an icon colored by the tunnels,
 // and a click opens it again as a popup (`props().overlay`) to switch tunnels and see their ports.
@@ -582,21 +584,23 @@ export default class Tunnels extends View {
         .child(busy ? div().text_color(t.working).frames(SPINNER, 90) : div().size(7).rounded(4).flex_none().bg(phaseColor(p, t)))
         .child(div().id(`state-${e.name}`).flex_1().min_w_0().truncate().text_color(p === "failed" || p === "stopped" ? t.blocked : t.muted).tooltip(line).child(line));
 
-      const forwards = (status?.forwards ?? []).map((f) =>
-        h_flex()
+      const forwards = (status?.forwards ?? []).map((f) => {
+        const icon = processIcon(f.process);
+        return h_flex()
           .id(`port-${e.name}-${f.port}`)
           .gap(8)
           .pl(INDENT)
           .pr(6)
           .rounded(4)
           .cursor_pointer()
-          .tooltip(`Open ${f.url}${f.conns ? ` · ${f.conns} open` : ""}`)
+          .tooltip(`Open ${f.url}${icon ? ` · ${f.process}` : ""}${f.conns ? ` · ${f.conns} open` : ""}`)
           .hover((s) => s.bg(t.hover))
           .on_click((_event, cx) => cx.open_url(f.url))
           .child(div().w(44).flex_none().text_color(t.accent).child(String(f.port)))
-          .child(div().flex_none().text_color(t.foreground).child(f.process || "?"))
-          .child(div().flex_1().min_w_0().truncate().text_color(t.dim).child(f.dir)),
-      );
+          .child(icon ? svg(icon).size(12).flex_none().text_color(t.muted) : div().flex_none().text_color(t.foreground).child(f.process || "?"))
+          // With an icon for the process, the container or folder is the row's name.
+          .child(div().flex_1().min_w_0().truncate().text_color(icon ? t.foreground : t.dim).child(forwardDetail(f)));
+      });
 
       const busyPorts = (status?.busy ?? []).map((b) =>
         h_flex()

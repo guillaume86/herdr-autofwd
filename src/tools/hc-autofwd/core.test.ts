@@ -135,7 +135,8 @@ describe("parsing", () => {
     const s = parseStatus(statusJSON()) as AutofwdStatus;
     assert.equal(s.state, "connected");
     assert.equal(s.retryAt, null);
-    assert.deepEqual(s.forwards[0], { port: 3000, url: "http://localhost:3000", remote: "127.0.0.1:3000", process: "node", dir: "~/src/shop", since: "2026-11-06T09:00:02.000Z", conns: 1 });
+    // Written by autofwd 0.3: no container key.
+    assert.deepEqual(s.forwards[0], { port: 3000, url: "http://localhost:3000", remote: "127.0.0.1:3000", process: "node", dir: "~/src/shop", container: "", since: "2026-11-06T09:00:02.000Z", conns: 1 });
     assert.deepEqual(s.busy, [{ port: 9229, reason: "local port busy", retryAt: "2026-11-06T09:00:32.000Z" }]);
     assert.equal(parseStatus(statusJSON({ format: 2 })), null);
     assert.equal(parseStatus("{ half"), null);
@@ -328,6 +329,16 @@ describe("what to show", () => {
       "    9229   busy: local port busy",
       "    skipped: 22",
       "· msi   msi-ubuntu   off (hc: timed out)",
+    ]);
+  });
+
+  test("a Docker port shows its container where the folder goes", () => {
+    const docker = { port: 5418, url: "http://localhost:5418", remote: "127.0.0.1:5418", process: "docker-proxy", dir: "", container: "pgsql18", container_addr: "172.17.0.2:5432", since: "2026-11-06T09:00:02.000Z", conns: 0 };
+    const unnamed = { ...docker, port: 5419, url: "http://localhost:5419", container: "" };
+    const s = parseStatus(statusJSON({ forwards: [docker, unnamed], busy: [], skipped: [] })) as AutofwdStatus;
+    assert.deepEqual(formatEntries(entries([desk], [tunnel({ status: s })]), now).slice(1), [
+      "    5418   http://localhost:5418    docker-proxy  pgsql18",
+      "    5419   http://localhost:5419    docker-proxy", // the address alone says little
     ]);
   });
 });

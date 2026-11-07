@@ -135,6 +135,8 @@ export interface Forward {
   /** The remote process (or systemd unit) and its folder, "" when unknown. */
   process: string;
   dir: string;
+  /** The Docker container behind a docker-proxy port (autofwd 0.4.0), "" when unknown or not Docker. */
+  container: string;
   since: string;
   conns: number;
 }
@@ -190,6 +192,7 @@ export function parseStatus(text: string): AutofwdStatus | null {
       remote: str(f.remote) ?? "",
       process: str(f.process) ?? "",
       dir: str(f.dir) ?? "",
+      container: str(f.container) ?? "",
       since: str(f.since) ?? "",
       conns: num(f.conns) ?? 0,
     })),
@@ -197,6 +200,9 @@ export function parseStatus(text: string): AutofwdStatus | null {
     skipped: list(raw.skipped).map((s) => ({ port: num(s.port) ?? 0, reason: str(s.reason) ?? "", process: str(s.process) ?? "" })),
   };
 }
+
+/** What a port's row shows after the process: the container, else the folder (autofwd's own label). */
+export const forwardDetail = (f: Forward): string => f.container || f.dir;
 
 /** A tunnel's status file name: its terminal's name and a token unique to this start. */
 export const statusFileName = (machine: string, token: string): string => `${terminalName(machine)}-${token}.json`;
@@ -542,7 +548,7 @@ export function formatEntries(list: Entry[], now: number): string[] {
     lines.push(line.trimEnd());
     const s = e.tunnel?.live ? e.tunnel.status : null;
     for (const f of s?.forwards ?? []) {
-      const what = [f.process, f.dir].filter(Boolean).join("  ");
+      const what = [f.process, forwardDetail(f)].filter(Boolean).join("  ");
       lines.push(`    ${String(f.port).padEnd(6)} ${f.url.padEnd(24)} ${what}`.trimEnd());
     }
     for (const b of s?.busy ?? []) lines.push(`    ${String(b.port).padEnd(6)} busy: ${b.reason}`);
